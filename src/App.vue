@@ -1,7 +1,8 @@
 <script setup>
 import Papa from 'papaparse'
 import { ref, computed, onMounted } from 'vue'
-import { driveToDirectUrl } from './utils/drive'
+
+import { extractDriveId, driveViewUrl, driveThumbUrl } from './utils/drive'
 
 // ====== CONFIG ======
 // Use "/estoque.csv" se estiver no public/ (CSV local)
@@ -46,6 +47,8 @@ async function loadCsv() {
   })
 }
 
+
+
 // Normaliza número levando em conta possíveis vírgulas
 function toNumber(value) {
   if (value === undefined || value === null || value === '') return 0
@@ -55,8 +58,14 @@ function toNumber(value) {
 }
 
 function normalizeRow(r) {
-  const frente = driveToDirectUrl(r[COLS.imgFrente])
-  const verso  = driveToDirectUrl(r[COLS.imgVerso])
+  const idFrente = extractDriveId((r[COLS.imgFrente] ?? '').toString().trim());
+  const idVerso  = extractDriveId((r[COLS.imgVerso]  ?? '').toString().trim());
+
+  const frenteView  = idFrente ? driveViewUrl(idFrente)  : null;
+  const frenteThumb = idFrente ? driveThumbUrl(idFrente) : null;
+
+  const versoView   = idVerso ? driveViewUrl(idVerso)    : null;
+  const versoThumb  = idVerso ? driveThumbUrl(idVerso)   : null;
 
   return {
     timestamp: r[COLS.timestamp] || '',
@@ -65,13 +74,16 @@ function normalizeRow(r) {
     codigo: r[COLS.codigo]?.trim() || '',
     marca: r[COLS.marca]?.trim() || '',
     categoria: r[COLS.categoria]?.trim() || '',
-    imgFrente: frente,
-    imgVerso: verso,
+    // guardamos as duas opções
+    imgFrenteView: frenteView,
+    imgFrenteThumb: frenteThumb,
+    imgVersoView: versoView,
+    imgVersoThumb: versoThumb,
+
     descricao: r[COLS.descricao] || '',
     precoCusto: toNumber(r[COLS.precoCusto]),
     precoVenda: toNumber(r[COLS.precoVenda]),
-    quantidade: toNumber(r[COLS.quantidade]), // vazio vira 0
-    // Dados derivados
+    quantidade: toNumber(r[COLS.quantidade]),
     valorEmEstoque() { return this.precoCusto * this.quantidade },
     margem() {
       if (this.precoCusto <= 0) return 0
@@ -79,7 +91,6 @@ function normalizeRow(r) {
     }
   }
 }
-
 // Normaliza texto para comparação (lowercase + remove acentos)
 function norm(s) {
   if (s == null) return ''
@@ -156,6 +167,26 @@ function toggleOrdem(col) {
   }
 }
 
+function onImgError(ev, p, lado /* 'frente' | 'verso' */) {
+  const img = ev && ev.target
+  if (!(img instanceof HTMLImageElement)) return
+
+  const step = img.dataset.step || 'thumb'
+  if (step === 'thumb') {
+    img.src = (lado === 'frente' ? p.imgFrenteView : p.imgVersoView) || ''
+    img.dataset.step = 'view'
+  } else {
+    console.warn('Falha ao carregar imagem do Drive (cheque permissão pública):', img.src)
+    // Placeholder simples:
+    const ph = document.createElement('div')
+    ph.className = 'media-placeholder'
+    ph.innerText = 'Imagem indisponível'
+    img.replaceWith(ph)
+  }
+}
+
+
+
 onMounted(async () => {
   try {
     const data = await loadCsv()
@@ -210,15 +241,18 @@ onMounted(async () => {
 
     <section class="grid">
       <article v-for="(p, i) in ordenadas" :key="p.id + '-' + i" class="card product">
-        <div class="media">
-          <img
-            v-if="p.imgFrente"
-            :src="p.imgFrente"
-            alt="Imagem do produto (frente)"
-            loading="lazy"
-          />
-          <div v-else class="media-placeholder">Sem imagem</div>
-        </div>
+    
+    <div class="media">
+      <img
+        v-if="p.imgFrenteThumb || p.imgFrenteView"
+        :src="p.imgFrenteThumb || p.imgFrenteView"
+        data-step="thumb"
+        alt="Imagem do produto (frente)"
+        loading="lazy"
+        @error="(e) => onImgError(e, p, 'frente')"
+      />
+      <div v-else class="media-placeholder">Sem imagem</div>
+    </div>
 
         <div class="content">
           <header class="product-header">
